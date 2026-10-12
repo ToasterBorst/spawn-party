@@ -7,15 +7,10 @@ import net.minecraft.server.level.ServerPlayer;
 import spawnparty.SpawnPartyConfig;
 import spawnparty.party.Party;
 import spawnparty.party.PartyManager;
+import spawnparty.spawn.HoldingCamera;
 import spawnparty.util.Servers;
 
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-
 public final class PartyChatService {
-
-	private static final Map<UUID, ChatChannel> CHANNELS = new ConcurrentHashMap<>();
 
 	private PartyChatService() {
 	}
@@ -27,21 +22,10 @@ public final class PartyChatService {
 				return false;
 			}
 
-			var server = Servers.of(sender);
-
-			if (SpawnPartyConfig.INSTANCE.partyChatEnabled && getChannel(sender) == ChatChannel.PARTY) {
-				Party party = PartyManager.byMember(sender.getUUID()).orElse(null);
-				if (party == null) {
-					sender.sendSystemMessage(Component.literal("You are not in a party. Switched to Global."));
-					setChannel(sender, ChatChannel.GLOBAL);
-				} else {
-					Component outgoing = Component.empty()
-							.append(Component.literal("[Party] ").withStyle(ChatFormatting.AQUA))
-							.append(PrefixService.prefixedName(sender))
-							.append(Component.literal(": ").append(Component.literal(raw)));
-					for (ServerPlayer member : PartyManager.onlineMembers(party, server)) {
-						member.sendSystemMessage(outgoing);
-					}
+			if (SpawnPartyConfig.INSTANCE.partyChatEnabled) {
+				String partyBody = extractPartyChatBody(raw);
+				if (partyBody != null) {
+					sendPartyMessage(sender, partyBody);
 					return false;
 				}
 			}
@@ -51,7 +35,7 @@ public final class PartyChatService {
 						.append(Component.literal("<"))
 						.append(PrefixService.prefixedName(sender))
 						.append(Component.literal("> " + raw));
-				for (ServerPlayer viewer : server.getPlayerList().getPlayers()) {
+				for (ServerPlayer viewer : Servers.of(sender).getPlayerList().getPlayers()) {
 					viewer.sendSystemMessage(outgoing);
 				}
 				return false;
@@ -61,28 +45,53 @@ public final class PartyChatService {
 		});
 	}
 
-	public static ChatChannel getChannel(ServerPlayer player) {
-		return CHANNELS.getOrDefault(player.getUUID(), ChatChannel.GLOBAL);
+	/**
+	 * If {@code raw} starts with a configured party-chat prefix (e.g. {@code !p hello}),
+	 * returns the message body (may be empty). Otherwise returns {@code null}.
+	 */
+	static String extractPartyChatBody(String raw) {
+		String text = raw == null ? "" : raw.trim();
+		if (text.isEmpty()) return null;
+		for (String prefix : SpawnPartyConfig.INSTANCE.partyChatPrefixes) {
+			if (text.equals(prefix)) {
+				return "";
+			}
+			String withSpace = prefix + " ";
+			if (text.startsWith(withSpace)) {
+				return text.substring(withSpace.length());
+			}
+		}
+		return null;
 	}
 
-	public static void setChannel(ServerPlayer player, ChatChannel channel) {
-		CHANNELS.put(player.getUUID(), channel);
-	}
+	private static void sendPartyMessage(ServerPlayer sender, String body) {
+		if (SpawnPartyConfig.INSTANCE.maxPartySize == 1) {
+			sender.sendSystemMessage(Component.literal("Party chat is unused in solo spawn mode."));
+			return;
+		}
+		if (HoldingCamera.isHolding(sender.getUUID())) {
+			sender.sendSystemMessage(Component.literal("Finish joining a party first."));
+			return;
+		}
+		Party party = PartyManager.byMember(sender.getUUID()).orElse(null);
+		if (party == null) {
+			sender.sendSystemMessage(Component.literal("Join a party to use party chat."));
+			return;
+		}
+		if (body == null || body.isBlank()) {
+			String example = SpawnPartyConfig.INSTANCE.partyChatPrefixes.isEmpty()
+					? "!p hello"
+					: SpawnPartyConfig.INSTANCE.partyChatPrefixes.getFirst() + " hello";
+			sender.sendSystemMessage(Component.literal("Usage: " + example));
+			return;
+		}
 
-	public static ChatChannel toggle(ServerPlayer player) {
-		if (!SpawnPartyConfig.INSTANCE.partyChatEnabled) {
-			player.sendSystemMessage(Component.literal("Party chat is disabled in config."));
-			return ChatChannel.GLOBAL;
+		Component outgoing = Component.empty()
+				.append(Component.literal("[Party] ").withStyle(ChatFormatting.AQUA))
+				.append(PrefixService.prefixedName(sender))
+				.append(Component.literal(": ").append(Component.literal(body)));
+		for (ServerPlayer member : PartyManager.onlineMembers(party, Servers.of(sender))) {
+			member.sendSystemMessage(outgoing);
 		}
-		ChatChannel next = getChannel(player) == ChatChannel.PARTY ? ChatChannel.GLOBAL : ChatChannel.PARTY;
-		if (next == ChatChannel.PARTY && PartyManager.byMember(player.getUUID()).isEmpty()) {
-			player.sendSystemMessage(Component.literal("Join a party to use party chat."));
-			return ChatChannel.GLOBAL;
-		}
-		setChannel(player, next);
-		String label = next == ChatChannel.PARTY ? "Party" : "Global";
-		player.sendOverlayMessage(Component.literal("Chat: " + label));
-		player.sendSystemMessage(Component.literal("Chat channel: " + label));
-		return next;
 	}
 }

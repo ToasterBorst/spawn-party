@@ -24,7 +24,7 @@ import java.util.UUID;
 
 public final class PartyStore {
 
-	private static final String FILE_NAME = "spawnparty-parties.json";
+	public static final String FILE_NAME = "spawnparty-parties.json";
 	private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
 	private PartyStore() {
@@ -118,6 +118,16 @@ public final class PartyStore {
 		spawn.addProperty("yaw", party.yaw);
 		spawn.addProperty("pitch", party.pitch);
 		obj.add("spawn", spawn);
+		JsonObject extras = new JsonObject();
+		if (party.setupExtras != null) {
+			for (var entry : party.setupExtras.entrySet()) {
+				if (entry.getKey() != null && entry.getValue() != null) {
+					extras.addProperty(entry.getKey(), entry.getValue());
+				}
+			}
+		}
+		obj.add("setupExtras", extras);
+		obj.addProperty("setupLocked", party.setupLocked);
 		return obj;
 	}
 
@@ -147,6 +157,19 @@ public final class PartyStore {
 			party.spawn = new BlockPos(spawn.get("x").getAsInt(), spawn.get("y").getAsInt(), spawn.get("z").getAsInt());
 			party.yaw = spawn.has("yaw") ? spawn.get("yaw").getAsFloat() : 0.0F;
 			party.pitch = spawn.has("pitch") ? spawn.get("pitch").getAsFloat() : 0.0F;
+			if (obj.has("setupExtras") && obj.get("setupExtras").isJsonObject()) {
+				JsonObject extras = obj.getAsJsonObject("setupExtras");
+				for (var entry : extras.entrySet()) {
+					if (entry.getValue() != null && entry.getValue().isJsonPrimitive()) {
+						party.setupExtras.put(entry.getKey(), entry.getValue().getAsString());
+					}
+				}
+			}
+			if (obj.has("setupLocked")) {
+				party.setupLocked = obj.get("setupLocked").getAsBoolean();
+			} else if (party.spawn != null && !party.spawn.equals(net.minecraft.core.BlockPos.ZERO)) {
+				party.setupLocked = true;
+			}
 			return party;
 		} catch (Exception e) {
 			SpawnPartyMod.LOGGER.warn("Skipping malformed party entry", e);

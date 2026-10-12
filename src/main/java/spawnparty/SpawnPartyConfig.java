@@ -3,6 +3,8 @@ package spawnparty;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Locale;
 import java.util.Properties;
 import java.util.Set;
@@ -26,6 +28,8 @@ public final class SpawnPartyConfig {
 	 * biome empty + false = safe spot searching outward from world spawn.
 	 */
 	public boolean preferVillage = true;
+	/** 0 = unlimited; >=1 = hard cap (1 = distributed solo spawning). */
+	public int maxPartySize = 0;
 	public boolean partyChatEnabled = true;
 	public boolean globalChatPrefix = true;
 	/** tag or name */
@@ -33,6 +37,8 @@ public final class SpawnPartyConfig {
 	public boolean tabListPrefix = true;
 	/** Spectator look toward +X (sunrise) while held at world spawn. */
 	public boolean holdingYawTowardSunrise = true;
+	/** Chat prefixes that send the rest of the line to party chat (e.g. !p hello). */
+	public List<String> partyChatPrefixes = new ArrayList<>(List.of("!p"));
 
 	public static SpawnPartyConfig load(Path configDir) {
 		Path file = configDir.resolve(FILE_NAME);
@@ -66,22 +72,30 @@ public final class SpawnPartyConfig {
 		partySpawnDistance = getInt(props, "party_spawn_distance", partySpawnDistance);
 		spawnBiome = getString(props, "spawn_biome", spawnBiome).trim();
 		preferVillage = getBool(props, "prefer_village", preferVillage);
+		maxPartySize = getInt(props, "max_party_size", maxPartySize);
 		partyChatEnabled = getBool(props, "party_chat_enabled", partyChatEnabled);
 		globalChatPrefix = getBool(props, "global_chat_prefix", globalChatPrefix);
 		chatPrefixMode = normalizePrefixMode(getString(props, "chat_prefix_mode", chatPrefixMode));
 		tabListPrefix = getBool(props, "tab_list_prefix", tabListPrefix);
 		holdingYawTowardSunrise = getBool(props, "holding_yaw_toward_sunrise", holdingYawTowardSunrise);
+		partyChatPrefixes = parsePrefixList(resolvePartyChatPrefixes(props));
 		sanitize();
 	}
 
 	public void sanitize() {
 		partySpawnDistance = Math.max(16, Math.min(100_000, partySpawnDistance));
+		maxPartySize = Math.max(0, Math.min(1000, maxPartySize));
 		chatPrefixMode = normalizePrefixMode(chatPrefixMode);
 		if (spawnBiome == null) {
 			spawnBiome = "";
 		} else {
 			spawnBiome = spawnBiome.trim();
 		}
+		partyChatPrefixes = sanitizePrefixes(partyChatPrefixes);
+	}
+
+	public boolean isPartyFull(int memberCount) {
+		return maxPartySize > 0 && memberCount >= maxPartySize;
 	}
 
 	public static String normalizePrefixMode(String mode) {
@@ -103,7 +117,8 @@ public final class SpawnPartyConfig {
 					# Spawn Party Configuration
 					#
 					# Live file: config/spawnparty.properties
-					# Party membership and spawn origins live in config/spawnparty-parties.json
+					# Party membership and spawn origins live per-world in:
+					#   saves/<world>/data/spawnparty/spawnparty-parties.json
 					# Clients do not need this mod installed.
 
 					# --- Party Spawn Distance ---
@@ -120,6 +135,7 @@ public final class SpawnPartyConfig {
 					#   biome empty + prefer_village=true  -> closest village to world spawn / search origin
 					#   biome empty + prefer_village=false -> safe spot searching outward from world spawn
 					# Always enforce party_spawn_distance against existing party origins.
+					# Ocean/water-surface origins are allowed (e.g. Waterworld raft starts).
 
 					# Optional biome id filter, e.g. minecraft:plains. Leave empty for any biome.
 					spawn_biome=%s
@@ -127,9 +143,13 @@ public final class SpawnPartyConfig {
 					# Prefer villages according to the matrix above.
 					prefer_village=%s
 
+					# Max members per party. 0 = unlimited. 1 = dispersed solo spawning (no menu/prefixes;
+					# each player auto-gets a spaced origin on first join).
+					max_party_size=%s
+
 					# --- Chat ---
 
-					# Allow party/global channel mode (/pchat or /spawnparty chat).
+					# Allow party chat via party_chat_prefix (e.g. !p hello).
 					party_chat_enabled=%s
 
 					# Prefix party tag or name on global chat messages.
@@ -141,26 +161,70 @@ public final class SpawnPartyConfig {
 					# Prefix party tag or name in the tab player list.
 					tab_list_prefix=%s
 
+					# Shorthand to speak in party chat. Example: !p this goes to your party only.
+					# Comma-separated if you want more than one (e.g. !p,!party). Empty = off.
+					party_chat_prefix=%s
+
 					# --- First-join Holding ---
 
-					# While held in spectator at world spawn, look toward +X (sunrise).
+					# While held in adventure above build height (looking straight down), yaw toward +X (sunrise).
 					holding_yaw_toward_sunrise=%s
 					""".formatted(
 					partySpawnDistance,
 					spawnBiome,
 					preferVillage,
+					maxPartySize,
 					partyChatEnabled,
 					globalChatPrefix,
 					chatPrefixMode,
 					tabListPrefix,
+					String.join(",", partyChatPrefixes),
 					holdingYawTowardSunrise
-			);
+			);			
 			Files.writeString(file, content);
 		} catch (IOException e) {
 			SpawnPartyMod.LOGGER.error("Failed to write config {}", file.getFileName(), e);
 		}
 	}
 
+	/**
+	 * Prefer {@code party_chat_prefix}. Fall back to legacy {@code party_chat_triggers}
+	 * so existing configs keep working after the channel-toggle removal.
+	 */
+	private static String resolvePartyChatPrefixes(Properties props) {
+		if (props.containsKey("party_chat_prefix")) {
+			return getString(props, "party_chat_prefix", "!p");
+		}
+		String legacyTriggers = props.getProperty("party_chat_triggers");
+		if (legacyTriggers != null && !legacyTriggers.isBlank()) {
+			return legacyTriggers;
+		}
+		return "!p";
+	}
+
+	private static List<String> parsePrefixList(String raw) {
+		List<String> out = new ArrayList<>();
+		if (raw == null || raw.isBlank()) return out;
+		for (String part : raw.split(",")) {
+			String s = part.trim();
+			if (!s.isEmpty()) out.add(s);
+		}
+		return out;
+	}
+
+	private static List<String> sanitizePrefixes(List<String> input) {
+		List<String> out = new ArrayList<>();
+		for (String s : input) {
+			if (s == null) continue;
+			String t = s.trim();
+			if (t.isEmpty() || out.contains(t)) continue;
+			// Avoid swallowing normal chat: require a non-letter lead-in (e.g. !p, #p).
+			char first = t.charAt(0);
+			if (Character.isLetterOrDigit(first)) continue;
+			out.add(t);
+		}
+		return out;
+	}
 	private static String getString(Properties props, String key, String def) {
 		String value = props.getProperty(key);
 		return value != null ? value : def;

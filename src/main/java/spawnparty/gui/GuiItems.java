@@ -34,15 +34,23 @@ public final class GuiItems {
 
 	public static Item dyeForColor(String color) {
 		return switch (color == null ? "gold" : color.toLowerCase()) {
-			case "red", "dark_red" -> Items.DYE.red();
-			case "blue", "dark_blue" -> Items.DYE.blue();
-			case "green", "dark_green" -> Items.DYE.green();
-			case "yellow" -> Items.DYE.yellow();
-			case "aqua", "cyan" -> Items.DYE.cyan();
-			case "light_purple", "pink", "magenta" -> Items.DYE.magenta();
-			case "white" -> Items.DYE.white();
-			case "gray" -> Items.DYE.gray();
+			case "black" -> Items.DYE.black();
+			case "dark_blue" -> Items.DYE.blue();
+			case "dark_green" -> Items.DYE.green();
+			case "dark_aqua", "cyan" -> Items.DYE.cyan();
+			case "dark_red" -> Items.DYE.red();
+			case "dark_purple", "purple" -> Items.DYE.purple();
 			case "gold", "orange" -> Items.DYE.orange();
+			case "gray" -> Items.DYE.lightGray();
+			case "dark_gray" -> Items.DYE.gray();
+			case "blue" -> Items.DYE.lightBlue();
+			case "green", "lime" -> Items.DYE.lime();
+			case "aqua" -> Items.DYE.lightBlue();
+			case "red" -> Items.DYE.red();
+			case "light_purple", "pink", "magenta" -> Items.DYE.magenta();
+			case "yellow" -> Items.DYE.yellow();
+			case "white" -> Items.DYE.white();
+			case "brown" -> Items.DYE.brown();
 			default -> Items.DYE.orange();
 		};
 	}

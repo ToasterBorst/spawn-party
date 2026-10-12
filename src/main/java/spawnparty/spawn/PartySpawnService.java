@@ -1,13 +1,19 @@
 package spawnparty.spawn;
 
+import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.core.BlockPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.level.GameType;
 import net.minecraft.world.level.storage.LevelData;
+import spawnparty.SpawnPartyMod;
+import spawnparty.api.SpawnPartyEvents;
 import spawnparty.party.Party;
 import spawnparty.party.PartyManager;
 import spawnparty.util.Servers;
+
+import java.lang.reflect.Method;
+import java.util.UUID;
 
 public final class PartySpawnService {
 
@@ -23,6 +29,18 @@ public final class PartySpawnService {
 				party.pitch
 		);
 		player.setRespawnPosition(new ServerPlayer.RespawnConfig(data, true), false);
+	}
+
+	/**
+	 * Sets party origin only if the player has no bed/anchor (forced=false) spawn.
+	 * Used for mid-game joins so beds are preserved.
+	 */
+	public static void setPartyOriginUnlessBed(ServerPlayer player, Party party) {
+		ServerPlayer.RespawnConfig current = player.getRespawnConfig();
+		if (current != null && isLikelyBedOrAnchor(current) && !isPartyOrigin(current, party)) {
+			return;
+		}
+		setPartyOrigin(player, party);
 	}
 
 	public static void clearPartyOrigin(ServerPlayer player) {
@@ -63,7 +81,6 @@ public final class PartySpawnService {
 	}
 
 	public static boolean isLikelyBedOrAnchor(ServerPlayer.RespawnConfig config) {
-		// Beds/anchors typically use forced=false; /spawnpoint and party origin use forced=true
 		return config != null && !config.forced();
 	}
 
@@ -79,8 +96,8 @@ public final class PartySpawnService {
 	}
 
 	/**
-	 * One-time placement when leaving the spectator holding lobby into the world at party origin.
-	 * Not used for mid-game party membership changes.
+	 * One-time placement when leaving the first-join hold into the world at party origin.
+	 * Fires {@link SpawnPartyEvents#AFTER_FIRST_ORIGIN_PLACEMENT}, then soft-calls Waterworld.
 	 */
 	public static void placeAtPartyOriginOnce(ServerPlayer player, Party party) {
 		setPartyOrigin(player, party);
@@ -90,7 +107,33 @@ public final class PartySpawnService {
 			level = server.overworld();
 		}
 		BlockPos pos = party.spawn;
+		for (var extension : SpawnSetupController.extensions()) {
+			try {
+				extension.beforePlacement(player, party, level, pos);
+			} catch (Throwable t) {
+				SpawnPartyMod.LOGGER.warn("Setup extension {} beforePlacement failed", extension.id(), t);
+			}
+		}
+		pos = party.spawn;
+		PartyManager.save();
 		player.setGameMode(GameType.SURVIVAL);
 		player.teleportTo(level, pos.getX() + 0.5, pos.getY(), pos.getZ() + 0.5, java.util.Set.of(), party.yaw, party.pitch, false);
+		SpawnPartyEvents.AFTER_FIRST_ORIGIN_PLACEMENT.invoker()
+				.onFirstOriginPlacement(player, party, level, pos, party.yaw, party.pitch);
+		notifyWaterworld(player, party.id, pos);
+	}
+
+	/** Soft bridge: Waterworld applies per-party island (once) + per-player gear. */
+	private static void notifyWaterworld(ServerPlayer player, UUID partyId, BlockPos origin) {
+		if (!FabricLoader.getInstance().isModLoaded("waterworld")) return;
+		try {
+			Class<?> hook = Class.forName("waterworld.compat.SpawnPartyOriginHook");
+			Method method = hook.getMethod("onFirstOriginPlacement", ServerPlayer.class, UUID.class, BlockPos.class);
+			method.invoke(null, player, partyId, origin);
+		} catch (ClassNotFoundException e) {
+			// Waterworld jar without hook — ignore
+		} catch (Throwable t) {
+			SpawnPartyMod.LOGGER.warn("Waterworld first-origin hook failed", t);
+		}
 	}
 }

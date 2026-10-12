@@ -21,10 +21,12 @@ public final class FirstJoinHandler {
 		});
 
 		ServerPlayConnectionEvents.DISCONNECT.register((handler, server) -> {
+			SpawnSetupController.drop(handler.getPlayer().getUUID());
 			HoldingCamera.stop(handler.getPlayer());
 		});
 
 		ServerTickEvents.END_SERVER_TICK.register(server -> {
+			SpawnSetupController.tick(server);
 			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
 				if (HoldingCamera.isHolding(player.getUUID())) {
 					HoldingCamera.tick(player);
@@ -48,6 +50,11 @@ public final class FirstJoinHandler {
 		}
 		if (PartyManager.isUnlocked(player.getUUID())) {
 			PrefixService.refresh(player);
+			return;
+		}
+		if (SoloSpawnService.isSoloMode()) {
+			HoldingCamera.start(player);
+			SpawnSetupController.beginSolo(player);
 			return;
 		}
 		HoldingCamera.start(player);

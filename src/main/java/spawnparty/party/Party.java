@@ -6,8 +6,10 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 public final class Party {
@@ -25,6 +27,8 @@ public final class Party {
 	public BlockPos spawn = BlockPos.ZERO;
 	public float yaw = 0.0F;
 	public float pitch = 0.0F;
+	public final Map<String, String> setupExtras = new LinkedHashMap<>();
+	public boolean setupLocked = false;
 
 	public Party() {
 	}

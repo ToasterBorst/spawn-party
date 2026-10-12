@@ -9,6 +9,8 @@ import spawnparty.SpawnPartyMod;
 import spawnparty.data.PartyStore;
 import spawnparty.util.PasswordUtil;
 
+import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -19,26 +21,51 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 public final class PartyManager {
 
-	private static Path configDir;
+	private static Path storeDir;
 	private static final List<Party> PARTIES = new CopyOnWriteArrayList<>();
 	private static final List<UUID> UNLOCKED = new CopyOnWriteArrayList<>();
 
 	private PartyManager() {
 	}
 
-	public static void init(Path dir) {
-		configDir = dir;
+	/**
+	 * Load parties for the current world save. Call on server start.
+	 * If the world has no data yet and a legacy global {@code config/spawnparty-parties.json}
+	 * exists, migrate it once into the world folder.
+	 */
+	public static void initForWorld(Path worldStoreDir, Path legacyGlobalFile) {
+		storeDir = worldStoreDir;
 		PARTIES.clear();
 		UNLOCKED.clear();
-		PartyStore.StoreData data = PartyStore.load(dir);
+		try {
+			Files.createDirectories(worldStoreDir);
+		} catch (IOException e) {
+			SpawnPartyMod.LOGGER.error("Could not create party store dir {}", worldStoreDir, e);
+		}
+		Path worldFile = worldStoreDir.resolve(PartyStore.FILE_NAME);
+		if (!Files.exists(worldFile) && legacyGlobalFile != null && Files.exists(legacyGlobalFile)) {
+			try {
+				Files.copy(legacyGlobalFile, worldFile);
+				SpawnPartyMod.LOGGER.info("Migrated legacy {} into world data {}", legacyGlobalFile.getFileName(), worldStoreDir);
+			} catch (IOException e) {
+				SpawnPartyMod.LOGGER.warn("Failed to migrate legacy party file", e);
+			}
+		}
+		PartyStore.StoreData data = PartyStore.load(worldStoreDir);
 		PARTIES.addAll(data.parties());
 		UNLOCKED.addAll(data.unlockedPlayers());
-		SpawnPartyMod.LOGGER.info("Loaded {} parties ({} unlocked players)", PARTIES.size(), UNLOCKED.size());
+		SpawnPartyMod.LOGGER.info("Loaded {} parties ({} unlocked players) from {}", PARTIES.size(), UNLOCKED.size(), worldStoreDir);
+	}
+
+	public static void clear() {
+		PARTIES.clear();
+		UNLOCKED.clear();
+		storeDir = null;
 	}
 
 	public static void save() {
-		if (configDir != null) {
-			PartyStore.save(configDir, new ArrayList<>(PARTIES), new ArrayList<>(UNLOCKED));
+		if (storeDir != null) {
+			PartyStore.save(storeDir, new ArrayList<>(PARTIES), new ArrayList<>(UNLOCKED));
 		}
 	}
 
@@ -85,11 +112,20 @@ public final class PartyManager {
 		save();
 	}
 
-	public static void addMember(Party party, UUID playerId) {
-		if (!party.members.contains(playerId)) {
-			party.members.add(playerId);
-			save();
+	public static boolean canAddMember(Party party) {
+		return !SpawnPartyConfig.INSTANCE.isPartyFull(party.members.size());
+	}
+
+	public static boolean addMember(Party party, UUID playerId) {
+		if (party.members.contains(playerId)) {
+			return true;
 		}
+		if (!canAddMember(party)) {
+			return false;
+		}
+		party.members.add(playerId);
+		save();
+		return true;
 	}
 
 	public static void removeMember(Party party, UUID playerId) {
