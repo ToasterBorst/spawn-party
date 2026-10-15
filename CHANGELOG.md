@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 1.0.0-beta.1
+
+Minecraft **26.3**, Fabric Loader 0.19.5. Jar: `spawnparty-26.3-fabric-1.0.0-beta.1.jar`.
+
+26.2 worlds are not a supported upgrade. Create a new world.
 
 ### Added
 
@@ -12,6 +16,7 @@
 - Brown party color (dye swatch + `TextColor` RGB, not a vanilla `ChatFormatting` name).
 - Ocean / water-surface party origins (no longer solid-land only).
 - `/sp` alias for `/spawnparty` (including `/sp admin`).
+- `SpawnSetupExtension.forwardBlocked` and `iconForLockedExtra`. Party creation asks for extension options before the party exists. After the first spawn those choices are read-only in the party menu.
 
 ### Fixed
 
@@ -34,10 +39,13 @@
 - Party chat is prefix-based only; channel toggle (`/spawnparty chat`, `/pchat`, exact-match triggers) is removed.
 - Global chat is no longer labeled `[Global]`; only party lines use `[Party]`.
 - Config: `party_chat_commands` / `party_chat_triggers` replaced by `party_chat_prefix` (legacy triggers still load once if the new key is missing).
-- Jar version string includes loader: `spawnparty-26.2-fabric-<mod_version>.jar`.
+- Jar version string includes loader: `spawnparty-26.3-fabric-1.0.0-beta.1.jar`.
+- Biome sampling uses the 26.3 biome resolver, so config and other mods' biome ids still work.
+- First-join locate uses the same village probe as admin relocate: a village within 200 blocks of the candidate, otherwise the candidate. A world with no villages, including any overworld while Waterworld is installed, keeps the normal origin.
 - First-join hold is no longer spectator at spawn+8.
 - Party spawn locate samples biome noise first (respects `party_spawn_distance`), then generates a small chunk square instead of large `findClosestBiome3d` scans.
 - `spawn_biome` is the SP-only fallback; extension biome/sampleY win when set. Distance stays Spawn Party's job.
+- Party and admin chests are 9×6. Back is the lower-left corner and Forward (or Next page) is the lower-right. Choice clicks no longer advance setup pages; only Forward does. Back on the locate clock cancels the search before the party is created.
 
 ### Initial
 

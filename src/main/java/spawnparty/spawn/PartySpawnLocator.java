@@ -11,6 +11,7 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.levelgen.Heightmap;
+import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
 import net.minecraft.world.level.material.Fluids;
 import spawnparty.SpawnPartyConfig;
 import spawnparty.SpawnPartyMod;
@@ -53,13 +54,26 @@ public final class PartySpawnLocator {
 	}
 
 	public static Holder<Biome> sampleBiome(ServerLevel level, int x, int z, int sampleY) {
-		var sampler = level.getChunkSource().randomState().sampler();
+		var randomState = level.getChunkSource().randomState();
+		var sampler = randomState.createClimateSampler(SamplerContext.EMPTY_UNCACHED);
 		var source = level.getChunkSource().getGenerator().getBiomeSource();
-		return source.getNoiseBiome(
+		return source.createResolver(sampler).getNoiseBiome(
 				QuartPos.fromBlock(x),
 				QuartPos.fromBlock(sampleY),
-				QuartPos.fromBlock(z),
-				sampler);
+				QuartPos.fromBlock(z));
+	}
+
+	/**
+	 * Shared village probe. A world with no villages (including any overworld
+	 * while Waterworld is installed) keeps {@code candidate}.
+	 */
+	public static BlockPos villageOrCandidate(ServerLevel level, BlockPos candidate, SpawnLocateRequest request, UUID ignorePartyId) {
+		if (!request.preferVillage()) return candidate;
+		BlockPos village = level.findNearestMapStructure(StructureTags.VILLAGE, candidate, STRUCTURE_RADIUS, false);
+		if (village != null && PartyManager.isFarEnoughFromOthers(village, ignorePartyId)) {
+			return village;
+		}
+		return candidate;
 	}
 
 	public static boolean biomeMatches(Holder<Biome> biome, Identifier want) {
@@ -89,13 +103,7 @@ public final class PartySpawnLocator {
 			if (biomeId != null && !biomeMatches(sampleBiome(level, candidate.getX(), candidate.getZ(), sampleY), biomeId)) {
 				continue;
 			}
-			BlockPos probe = candidate;
-			if (request.preferVillage()) {
-				BlockPos village = level.findNearestMapStructure(StructureTags.VILLAGE, candidate, STRUCTURE_RADIUS, false);
-				if (village != null && PartyManager.isFarEnoughFromOthers(village, ignorePartyId)) {
-					probe = village;
-				}
-			}
+			BlockPos probe = PartySpawnLocator.villageOrCandidate(level, candidate, request, ignorePartyId);
 			BlockPos safe = findSafeStanding(level, probe);
 			if (safe == null) continue;
 			if (!PartyManager.isFarEnoughFromOthers(safe, ignorePartyId)) continue;

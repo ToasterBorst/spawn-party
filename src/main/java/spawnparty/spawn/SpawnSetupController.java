@@ -6,7 +6,9 @@ import net.minecraft.resources.Identifier;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.Items;
+import spawnparty.api.SetupPage;
 import spawnparty.SpawnPartyConfig;
 import spawnparty.SpawnPartyMod;
 import spawnparty.api.SetupMenuHost;
@@ -94,27 +96,79 @@ public final class SpawnSetupController {
 		}
 	}
 
-	public static void beginCreate(ServerPlayer player, PartyDraft draft) {
-		Job job = new Job();
-		job.kind = Kind.CREATE;
-		job.draft = draft;
-		job.session = new SpawnSetupSession();
-		job.wasHolding = HoldingCamera.isHolding(player.getUUID());
-		JOBS.put(player.getUUID(), job);
-		startPagesOrLocate(player, job);
+	/**
+	 * Identity page Forward. Reuses the session if the player already stepped
+	 * into extension pages, then either opens those pages or starts locate.
+	 * The party is created only after locate finishes.
+	 */
+	public static void advanceFromIdentity(ServerPlayer player, PartyDraft draft) {
+		Job existing = JOBS.get(player.getUUID());
+		Job job;
+		if (existing != null && existing.kind == Kind.CREATE && existing.state == State.PAGES) {
+			job = existing;
+			job.draft = draft;
+		} else {
+			if (existing != null) {
+				JOBS.remove(player.getUUID());
+				REOPEN.remove(player.getUUID());
+			}
+			job = new Job();
+			job.kind = Kind.CREATE;
+			job.draft = draft;
+			job.session = new SpawnSetupSession();
+			job.wasHolding = HoldingCamera.isHolding(player.getUUID());
+			collectPages(player, job);
+			JOBS.put(player.getUUID(), job);
+		}
+		if (job.pendingPages.isEmpty()) {
+			startLocate(player, job);
+		} else {
+			openPage(player, job, 0);
+		}
+	}
+
+	/** True while the player is on the identity page or an extension page. */
+	public static boolean hasWizard(UUID playerId) {
+		Job job = JOBS.get(playerId);
+		return job != null && job.state == State.PAGES;
+	}
+
+	/**
+	 * Paint corner Back and Forward for the active wizard. Status pages keep Back
+	 * so locate can be cancelled before the party exists.
+	 */
+	public static void stampNav(ServerPlayer player, SetupPage page, boolean statusOnly) {
+		Job job = JOBS.get(player.getUUID());
+		if (job == null || page == null) return;
+		if (job.navBack != null) {
+			page.setSlot(SetupMenuHost.NAV_BACK, GuiItems.button(Items.ARROW, "Back"), job.navBack);
+		} else {
+			page.setSlot(SetupMenuHost.NAV_BACK, GuiItems.filler(), null);
+		}
+		if (!statusOnly && job.navForward != null) {
+			Item icon = "Create Party".equals(job.forwardLabel) ? Items.EMERALD_BLOCK : Items.ARROW;
+			String label = job.forwardLabel == null ? "Next" : job.forwardLabel;
+			page.setSlot(SetupMenuHost.NAV_CONFIRM, GuiItems.button(icon, label), job.navForward);
+		} else {
+			page.setSlot(SetupMenuHost.NAV_CONFIRM, GuiItems.filler(), null);
+		}
 	}
 
 	public static void beginSolo(ServerPlayer player) {
 		Job job = new Job();
 		job.kind = Kind.SOLO;
 		job.session = new SpawnSetupSession();
-		job.wasHolding = HoldingCamera.isHolding(player.getUUID());
-		if (!job.wasHolding) {
+		if (!HoldingCamera.isHolding(player.getUUID())) {
 			HoldingCamera.start(player);
-			job.wasHolding = true;
 		}
+		job.wasHolding = true;
+		collectPages(player, job);
 		JOBS.put(player.getUUID(), job);
-		startPagesOrLocate(player, job);
+		if (job.pendingPages.isEmpty()) {
+			startLocate(player, job);
+		} else {
+			openPage(player, job, 0);
+		}
 	}
 
 	public static void tick(MinecraftServer server) {
@@ -128,33 +182,63 @@ public final class SpawnSetupController {
 	}
 
 	private static void startPagesOrLocate(ServerPlayer player, Job job) {
-		job.pendingPages = new ArrayList<>();
-		for (SpawnSetupExtension extension : EXTENSIONS) {
-			if (extension.wantsSelection(player)) {
-				job.pendingPages.add(extension);
-			}
-		}
+		collectPages(player, job);
 		job.pageIndex = 0;
 		if (job.pendingPages.isEmpty()) {
 			startLocate(player, job);
 			return;
 		}
 		HoldingCamera.setPhase(player.getUUID(), HoldPhase.SETUP);
-		openNextPage(player, job);
+		openPage(player, job, 0);
 	}
 
-	private static void openNextPage(ServerPlayer player, Job job) {
-		if (job.pageIndex >= job.pendingPages.size()) {
+	private static void collectPages(ServerPlayer player, Job job) {
+		job.pendingPages = new ArrayList<>();
+		for (SpawnSetupExtension extension : EXTENSIONS) {
+			if (extension.wantsSelection(player)) {
+				job.pendingPages.add(extension);
+			}
+		}
+	}
+
+	private static void openPage(ServerPlayer player, Job job, int index) {
+		if (!JOBS.containsKey(player.getUUID())) return;
+		if (index < 0) {
+			job.state = State.PAGES;
+			if (job.kind == Kind.CREATE) {
+				PartyMenus.openCreate(player);
+			}
+			return;
+		}
+		if (index >= job.pendingPages.size()) {
 			startLocate(player, job);
 			return;
 		}
+		job.pageIndex = index;
 		job.state = State.PAGES;
-		SpawnSetupExtension extension = job.pendingPages.get(job.pageIndex);
-		job.pageIndex++;
+		SpawnSetupExtension extension = job.pendingPages.get(index);
+		boolean last = index == job.pendingPages.size() - 1;
+		boolean showBack = job.kind == Kind.CREATE || index > 0;
+		job.navBack = showBack ? () -> openPage(player, job, index - 1) : null;
+		job.forwardLabel = last ? (job.kind == Kind.SOLO ? "Continue" : "Create Party") : "Next";
+		job.navForward = () -> {
+			if (!JOBS.containsKey(player.getUUID())) return;
+			Component blocked = null;
+			try {
+				blocked = extension.forwardBlocked(player, job.session);
+			} catch (Throwable t) {
+				SpawnPartyMod.LOGGER.warn("Setup extension {} forwardBlocked failed", extension.id(), t);
+			}
+			if (blocked != null) {
+				player.sendSystemMessage(blocked);
+				openPage(player, job, index);
+				return;
+			}
+			openPage(player, job, index + 1);
+		};
 		int beforeId = player.containerMenu.containerId;
 		extension.openSelection(player, job.session, () -> {
-			if (!JOBS.containsKey(player.getUUID())) return;
-			openNextPage(player, job);
+			// Choice clicks may call done. Only the corner Forward button advances.
 		});
 		if (player.containerMenu.containerId == beforeId) {
 			failSelection(player, job, extension.id());
@@ -192,6 +276,11 @@ public final class SpawnSetupController {
 		job.chunkCursor = new int[] {0};
 		job.state = State.SEARCH;
 		job.status = "Finding spawn…";
+		job.navForward = null;
+		job.forwardLabel = null;
+		job.navBack = job.kind == Kind.CREATE || !job.pendingPages.isEmpty()
+				? () -> abortLocate(player, job)
+				: null;
 		HoldingCamera.setPhase(player.getUUID(), HoldPhase.LOCATING);
 		if (job.wasHolding) {
 			openStatus(player, job);
@@ -229,7 +318,7 @@ public final class SpawnSetupController {
 						PartySpawnLocator.sampleBiome(level, candidate.getX(), candidate.getZ(), sampleY), biomeId)) {
 					continue;
 				}
-				job.probe = candidate;
+				job.probe = PartySpawnLocator.villageOrCandidate(level, candidate, job.request, null);
 				job.chunkCursor[0] = 0;
 				job.state = State.PREPARE;
 				job.status = "Generating chunks…";
@@ -260,6 +349,20 @@ public final class SpawnSetupController {
 		finish(player, job, new PartySpawnLocator.LocatedSpawn(level.dimension(), standing, yaw, 0.0F));
 	}
 
+	private static void abortLocate(ServerPlayer player, Job job) {
+		if (JOBS.get(player.getUUID()) != job) return;
+		job.state = State.PAGES;
+		job.ticks = 0;
+		job.candidateIndex = 0;
+		job.probe = null;
+		job.chunkCursor[0] = 0;
+		if (job.pendingPages.isEmpty()) {
+			PartyMenus.openCreate(player);
+			return;
+		}
+		openPage(player, job, job.pendingPages.size() - 1);
+	}
+
 	private static void finishFallback(ServerPlayer player, Job job) {
 		ServerLevel level = Servers.of(player).overworld();
 		var located = PartySpawnLocator.locate(level, player, job.request, null);
@@ -273,6 +376,7 @@ public final class SpawnSetupController {
 						HoldingCamera.setPhase(player.getUUID(), HoldPhase.MENU);
 						PartyMenus.openCreate(player);
 					} else if (job.wasHolding) {
+						JOBS.put(player.getUUID(), job);
 						HoldingCamera.setPhase(player.getUUID(), HoldPhase.SETUP);
 						startPagesOrLocate(player, job);
 					}
@@ -301,6 +405,7 @@ public final class SpawnSetupController {
 		party.setupExtras.putAll(job.session.toStringMap());
 		party.setupLocked = true;
 		PartyManager.save();
+		PartyMenus.discardDraft(player.getUUID());
 
 		for (SpawnSetupExtension extension : EXTENSIONS) {
 			try {
@@ -348,6 +453,9 @@ public final class SpawnSetupController {
 		int ticks;
 		State state = State.PAGES;
 		String status = "Finding spawn…";
+		Runnable navBack;
+		Runnable navForward;
+		String forwardLabel;
 	}
 
 	public record PartyDraft(String name, String tag, String color, PartyAccess access, String password) {

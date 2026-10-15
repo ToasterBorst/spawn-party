@@ -5,6 +5,7 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.SimpleMenuProvider;
 import net.minecraft.world.item.Items;
+import spawnparty.api.SetupMenuHost;
 import spawnparty.chat.PrefixService;
 import spawnparty.chat.PromptService;
 import spawnparty.party.Party;
@@ -37,8 +38,8 @@ public final class OpAdminMenu {
 		PAGE.put(op.getUUID(), safePage);
 		List<Party> pageItems = Pagination.page(parties, safePage);
 
-		op.openMenu(new SimpleMenuProvider((id, inv, p) -> {
-			PartyChestMenu menu = new PartyChestMenu(id, inv, slot -> onListClick(op, slot, parties, safePage), true);
+		SetupMenuHost.runReplacing(() -> op.openMenu(new SimpleMenuProvider((id, inv, p) -> {
+			PartyChestMenu menu = new PartyChestMenu(id, inv, slot -> onListClick(op, slot, parties, safePage), true, PartyChestMenu.ROWS_DOUBLE);
 			menu.fill(GuiItems.filler());
 			for (int i = 0; i < pageItems.size(); i++) {
 				Party party = pageItems.get(i);
@@ -51,12 +52,12 @@ public final class OpAdminMenu {
 						"Click to manage"
 				));
 			}
-			menu.setSlot(21, GuiItems.button(Items.ARROW, "Prev Page"));
-			menu.setSlot(22, GuiItems.button(Items.PAPER, "Page " + (safePage + 1) + "/" + Pagination.pageCount(parties.size())));
-			menu.setSlot(23, GuiItems.button(Items.ARROW, "Next Page"));
-			menu.setSlot(26, GuiItems.button(Items.BARRIER, "Close"));
+			menu.setSlot(SetupMenuHost.NAV_BACK, GuiItems.button(Items.BARRIER, "Close"));
+			menu.setSlot(SetupMenuHost.NAV_PREV, GuiItems.button(Items.ARROW, "Prev Page"));
+			menu.setSlot(SetupMenuHost.NAV_INFO, GuiItems.button(Items.PAPER, "Page " + (safePage + 1) + "/" + Pagination.pageCount(parties.size())));
+			menu.setSlot(SetupMenuHost.NAV_CONFIRM, GuiItems.button(Items.ARROW, "Next Page"));
 			return menu;
-		}, Component.literal("Spawn Party Admin")));
+		}, Component.literal("Spawn Party Admin"))));
 	}
 
 	private static void onListClick(ServerPlayer op, int slot, List<Party> parties, int page) {
@@ -66,17 +67,17 @@ public final class OpAdminMenu {
 			return;
 		}
 		switch (slot) {
-			case 21 -> open(op, page - 1);
-			case 23 -> open(op, page + 1);
-			case 26 -> op.closeContainer();
+			case SetupMenuHost.NAV_PREV -> open(op, page - 1);
+			case SetupMenuHost.NAV_CONFIRM -> open(op, page + 1);
+			case SetupMenuHost.NAV_BACK -> op.closeContainer();
 			default -> {
 			}
 		}
 	}
 
 	private static void openParty(ServerPlayer op, Party party) {
-		op.openMenu(new SimpleMenuProvider((id, inv, p) -> {
-			PartyChestMenu menu = new PartyChestMenu(id, inv, slot -> onPartyClick(op, party, slot), true);
+		SetupMenuHost.runReplacing(() -> op.openMenu(new SimpleMenuProvider((id, inv, p) -> {
+			PartyChestMenu menu = new PartyChestMenu(id, inv, slot -> onPartyClick(op, party, slot), true, PartyChestMenu.ROWS_DOUBLE);
 			menu.fill(GuiItems.filler());
 			menu.setSlot(10, GuiItems.button(Items.NAME_TAG, "Rename", party.name));
 			menu.setSlot(11, GuiItems.button(Items.PAPER, "Retag", party.tag));
@@ -84,9 +85,9 @@ public final class OpAdminMenu {
 			menu.setSlot(13, GuiItems.button(Items.COMPASS, "Relocate Spawn", "Find a new origin (no player teleport)"));
 			menu.setSlot(14, GuiItems.button(Items.GOLDEN_HELMET, "Transfer Leader"));
 			menu.setSlot(16, GuiItems.button(Items.TNT, "Delete Party", "Force delete"));
-			menu.setSlot(22, GuiItems.button(Items.ARROW, "Back"));
+			menu.setSlot(SetupMenuHost.NAV_BACK, GuiItems.button(Items.ARROW, "Back"));
 			return menu;
-		}, Component.literal("Admin: " + party.name)));
+		}, Component.literal("Admin: " + party.name))));
 	}
 
 	private static void onPartyClick(ServerPlayer op, Party party, int slot) {
@@ -142,6 +143,7 @@ public final class OpAdminMenu {
 				});
 			}
 			case 14 -> openTransfer(op, party, 0);
+			case SetupMenuHost.NAV_BACK -> open(op);
 			case 16 -> {
 				String partyName = party.name;
 				List<UUID> members = new ArrayList<>(party.members);
@@ -157,7 +159,6 @@ public final class OpAdminMenu {
 				op.sendSystemMessage(Component.literal("Deleted party."));
 				open(op);
 			}
-			case 22 -> open(op);
 			default -> {
 			}
 		}
@@ -167,21 +168,21 @@ public final class OpAdminMenu {
 		List<UUID> members = new ArrayList<>(party.members);
 		int safePage = Math.max(0, Math.min(page, Pagination.pageCount(members.size()) - 1));
 		List<UUID> pageItems = Pagination.page(members, safePage);
-		op.openMenu(new SimpleMenuProvider((id, inv, p) -> {
+		SetupMenuHost.runReplacing(() -> op.openMenu(new SimpleMenuProvider((id, inv, p) -> {
 			PartyChestMenu menu = new PartyChestMenu(id, inv, slot -> {
 				if (slot >= 0 && slot < pageItems.size()) {
 					UUID target = pageItems.get(slot);
 					PartyManager.transferLeader(party, target);
 					op.sendSystemMessage(Component.literal("Leader transferred."));
 					openParty(op, party);
-				} else if (slot == 21) {
+				} else if (slot == SetupMenuHost.NAV_PREV) {
 					openTransfer(op, party, safePage - 1);
-				} else if (slot == 23) {
+				} else if (slot == SetupMenuHost.NAV_CONFIRM) {
 					openTransfer(op, party, safePage + 1);
-				} else if (slot == 26) {
+				} else if (slot == SetupMenuHost.NAV_BACK) {
 					openParty(op, party);
 				}
-			}, true);
+			}, true, PartyChestMenu.ROWS_DOUBLE);
 			menu.fill(GuiItems.filler());
 			for (int i = 0; i < pageItems.size(); i++) {
 				UUID idMember = pageItems.get(i);
@@ -189,11 +190,12 @@ public final class OpAdminMenu {
 				boolean leader = party.isLeader(idMember);
 				menu.setSlot(i, GuiItems.button(Items.GOLDEN_HELMET, (leader ? "* " : "") + name));
 			}
-			menu.setSlot(21, GuiItems.button(Items.ARROW, "Prev"));
-			menu.setSlot(23, GuiItems.button(Items.ARROW, "Next"));
-			menu.setSlot(26, GuiItems.button(Items.BARRIER, "Back"));
+			menu.setSlot(SetupMenuHost.NAV_BACK, GuiItems.button(Items.ARROW, "Back"));
+			menu.setSlot(SetupMenuHost.NAV_PREV, GuiItems.button(Items.ARROW, "Prev"));
+			menu.setSlot(SetupMenuHost.NAV_INFO, GuiItems.button(Items.PAPER, "Page " + (safePage + 1) + "/" + Pagination.pageCount(members.size())));
+			menu.setSlot(SetupMenuHost.NAV_CONFIRM, GuiItems.button(Items.ARROW, "Next"));
 			return menu;
-		}, Component.literal("Transfer Leader")));
+		}, Component.literal("Transfer Leader"))));
 	}
 
 	private static String resolveName(net.minecraft.server.MinecraftServer server, UUID id) {

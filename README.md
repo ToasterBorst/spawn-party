@@ -8,8 +8,8 @@ Multiplayer, but make it a party. Shared spawn origins, chest menus with vanilla
 - **Party origins** — Create or join a party; your personal spawn origin becomes that party's pad (stand-in for world spawn). Beds and death work like vanilla; no bed means party origin, including End return.
 - **Spread-out spawns** — Configurable minimum distance between different parties' origins (default 3000). Dry land or ocean/water-surface pads are valid.
 - **Max party size** — Optional hard cap (`max_party_size`; `0` = unlimited). **`1` = dispersed solo spawning** (no create/join name form or chat prefixes). Other mods can still show first-join setup pages; otherwise the player is held briefly while a spaced origin is found.
-- **Biome / village targeting** — Prefer villages in a biome, fall back to the closest village to that biome, or free-roam safe spots.
-- **First-join menu** — When `max_party_size` is not 1, new players are held in adventure mode (flight, invulnerable) above build height looking straight down, with a chest GUI until they create or join a party. Spawn locate waits for chunks (no server freeze). Other mods can add extra setup pages via `SpawnSetupExtension`.
+- **Biome / village targeting** — Candidates spread out from world spawn. An optional biome filter keeps only matching columns. When `prefer_village` is on, a village within 200 blocks of that candidate is used if it is far enough from other parties; otherwise the candidate stands. A world with no villages, including any overworld while Waterworld is installed, uses the normal origin.
+- **First-join menu** — When `max_party_size` is not 1, new players are held in adventure mode (flight, invulnerable) above build height looking straight down, with a chest GUI until they create or join a party. Creating a party is a wizard: name and access, then any extra setup pages, then Forward. Spawn locate waits for chunks (no server freeze) and Back cancels it before the party exists. After the first spawn, those extra choices are locked in the party menu.
 - **Open / closed / password parties** — Leaders manage access from the menu.
 - **Party chat** — Prefix a line with a configurable shorthand (default `!p`) to speak to your party only, e.g. `!p meet at the river`.
 - **Chat prompts** — Name / tag / password prompts close the chest GUI so you can type in chat (the first-join hold will not re-open the menu until you finish or cancel).
@@ -23,11 +23,12 @@ All settings live in `config/spawnparty.properties`. Party membership and origin
 
 ## Installation
 
-1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft 26.2+.
-2. Drop the jar in the server (or singleplayer) `mods/` folder with Fabric API.
+1. Install [Fabric Loader](https://fabricmc.net/use/) for Minecraft **26.3**.
+2. Drop `spawnparty-26.3-fabric-1.0.0-beta.1.jar` in the server (or singleplayer) `mods/` folder with Fabric API.
 3. Clients do **not** need the mod.
+4. Create a **new** world. Worlds from 26.2 are not a supported upgrade.
 
-Artifact name includes the loader: `spawnparty-26.2-fabric-1.0.0.jar`.
+Artifact name includes the loader: `spawnparty-26.3-fabric-1.0.0-beta.1.jar`.
 
 
 ## Commands
@@ -48,17 +49,19 @@ Config file: `config/spawnparty.properties` (created on first launch).
 |-----|---------|--------|
 | `party_spawn_distance` | `3000` | Minimum blocks between different parties' spawn origins |
 | `spawn_biome` | *(empty)* | Optional biome id (e.g. `minecraft:plains`). Empty = any biome. Used only when no setup extension set a biome; **distance is always Spawn Party's job**. |
-| `prefer_village` | `true` | Prefer villages per matrix below |
+| `prefer_village` | `true` | Look for a village within 200 blocks of a candidate (see matrix) |
 | `max_party_size` | `0` | `0` = unlimited; `>=1` = hard cap. **`1` = solo dispersed mode**: no party menu, no prefixes; each new player auto-receives a spaced origin |
 
 **Spawn matrix**
 
 | `spawn_biome` | `prefer_village` | Behavior |
 |---------------|------------------|----------|
-| set | true | Village **in** that biome; else **closest village** to that biome |
-| set | false | Safe surface in that biome |
-| empty | true | Closest village to world spawn |
+| set | true | Candidate in that biome. If a village is within 200 blocks and far enough from other parties, use the village; otherwise the candidate |
+| set | false | Safe surface at a candidate in that biome |
+| empty | true | Candidate outward from world spawn. Village within 200 blocks if one exists and is far enough; otherwise the candidate |
 | empty | false | Safe spot searching outward from world spawn |
+
+This is a 200-block probe around the candidate, not a search for the closest village anywhere in the world. A world with no villages, including any overworld while Waterworld is installed (that mod replaces the village structure set with an empty one), uses the normal origin.
 
 Ocean / water-surface origins are allowed (compatible with Waterworld raft starts).
 
@@ -103,7 +106,7 @@ Fabric `JOIN` listeners run while Spawn Party still holds the player above the w
 
 `contributeLocate` is independent of `wantsSelection`: a config-only biome still filters locate.
 
-Solo (`max_party_size=1`): if any extension wants selection, the player is held and shown those pages (no party name form), then auto-placed as a 1-person party. If none do, they are held only while origin chunks generate.
+Solo (`max_party_size=1`): if any extension wants selection, the player is held and shown those pages (no party name form). The first page has no Back. Forward on the last page places them as a 1-person party. If none want a page, they are held only while origin chunks generate.
 
 Spawn Party does **not** depend on Waterworld. Waterworld optionally soft-bridges (`suggests` only).
 
@@ -112,7 +115,7 @@ Spawn Party does **not** depend on Waterworld. Waterworld optionally soft-bridge
 
 Register from your mod init (soft-detect with `FabricLoader.isModLoaded("spawnparty")` if you do not compile against Spawn Party). Distance between origins is Spawn Party's job. Biome and sample Y come from extensions when present.
 
-`SetupMenuHost` opens a 9×6 chest. Prefer `SetupPageFiller` (or `SpawnPartyAPI.openSetupPage`) over `Consumer<SetupPage>`. It already fills gray glass; `fillFiller()` clears slots **and** click handlers. Bottom row: `NAV_BACK` 45, `NAV_PREV` 47, `NAV_INFO` 49, `NAV_NEXT` 51, `NAV_CONFIRM` 53. Content is slots 0–44. Setup/status chests do not close into empty hold (Escape reopens the same page). Call `done` once when finished; do not call `done` if a page failed to open.
+`SetupMenuHost` opens a 9×6 chest. Prefer `SetupPageFiller` (or `SpawnPartyAPI.openSetupPage`) over `Consumer<SetupPage>`. It already fills gray glass; `fillFiller()` clears slots **and** click handlers. Content is slots 0–44. While a wizard is active the host paints **Back** (`NAV_BACK` 45, lower left) and **Forward** (`NAV_CONFIRM` 53, lower right) after your fill and overwrites those slots. `NAV_PREV` 47, `NAV_INFO` 49, and `NAV_NEXT` 51 stay free for your own controls. Choice clicks must `session.put` the value and may reopen the page to show it. They must not advance the wizard. Calling `done` does not change pages. Return a message from `forwardBlocked` to keep the player here until a choice is stored; return null to allow Forward. Forward is **Next** until the last page, then **Create Party** (or **Continue** in solo). The party is created only after that last Forward, once a spawn is found. Back on the locate clock cancels the search and returns to the last page. Setup/status chests do not close into empty hold (Escape reopens the same page). Do not call `done` if a page failed to open.
 
 ```java
 package mymod.compat;
@@ -150,12 +153,31 @@ public final class ExampleSetup implements SpawnSetupExtension {
 
 	@Override
 	public void openSelection(ServerPlayer player, SpawnSetupSession session, Runnable done) {
+		String picked = session.get(EXTRA).orElse("");
 		SetupMenuHost.open(player, Component.literal("Example Setup"), page -> {
-			page.setSlot(13, named(Items.COMPASS, "Continue"), () -> {
-				session.put(EXTRA, "ok");
-				done.run();
+			page.setSlot(11, named(Items.COMPASS, "Plains" + ("plains".equals(picked) ? " (selected)" : "")), () -> {
+				session.put(EXTRA, "plains");
+				openSelection(player, session, done);
+			});
+			page.setSlot(15, named(Items.CLOCK, "Night" + ("night".equals(picked) ? " (selected)" : "")), () -> {
+				session.put(EXTRA, "night");
+				openSelection(player, session, done);
 			});
 		});
+	}
+
+	@Override
+	public Component forwardBlocked(ServerPlayer player, SpawnSetupSession session) {
+		if (session.get(EXTRA).isEmpty()) {
+			return Component.literal("Pick a mode first.");
+		}
+		return null;
+	}
+
+	@Override
+	public ItemStack iconForLockedExtra(spawnparty.party.Party party, String key, String value) {
+		if (!EXTRA.toString().equals(key)) return null;
+		return named(Items.COMPASS, "Mode: " + value);
 	}
 
 	@Override
@@ -179,7 +201,7 @@ public final class ExampleSetup implements SpawnSetupExtension {
 }
 ```
 
-Read locked extras later with `SpawnPartyAPI.getPartyExtras(partyId)` or `extrasForMember(playerId)`. Hold/reopen: while `SpawnPartyAPI.isHolding(uuid)`, setup pages stay up; do not `closeContainer` before `SetupMenuHost.open` (the new menu replaces the current chest).
+Read locked extras later with `SpawnPartyAPI.getPartyExtras(partyId)` or `extrasForMember(playerId)`. The party menu lists them after the first spawn; clicks do not edit them. `iconForLockedExtra` can replace the default paper icon. Hold/reopen: while `SpawnPartyAPI.isHolding(uuid)`, setup pages stay up; do not `closeContainer` before `SetupMenuHost.open` (the new menu replaces the current chest).
 
 `contributeLocate` merge: first biome wins; any `preferVillage=false` wins; max prepare radius; standing predicates AND.
 

@@ -3,8 +3,8 @@ package spawnparty.api;
 import net.minecraft.world.item.ItemStack;
 
 /**
- * One hosted 9x6 chest page. Bottom row (slots 45–53) is reserved for navigation
- * unless the caller writes those slots itself.
+ * One hosted 9x6 chest page. Slots 45 and 53 are Back and Forward while a wizard
+ * is active; the host overwrites those slots after the page is filled.
  */
 public interface SetupPage {
 

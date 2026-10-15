@@ -31,9 +31,20 @@ public final class SetupMenuHost {
 	private SetupMenuHost() {
 	}
 
-	/** True while {@link #open} is replacing the current chest — skip Escape-reopen. */
+	/** True while a chest is being replaced — skip Escape-reopen. */
 	public static boolean replacingMenu() {
 		return Boolean.TRUE.equals(REPLACING.get());
+	}
+
+	/** Run {@code action} without the hold mixin treating the close as Escape. */
+	public static void runReplacing(Runnable action) {
+		boolean previous = REPLACING.get();
+		REPLACING.set(true);
+		try {
+			action.run();
+		} finally {
+			REPLACING.set(previous);
+		}
 	}
 
 	public static void open(ServerPlayer player, Component title, Consumer<SetupPage> fill) {
@@ -69,7 +80,7 @@ public final class SetupMenuHost {
 			boolean statusOnly, int id, net.minecraft.world.entity.player.Inventory inv) {
 		Runnable[] clicks = new Runnable[PartyChestMenu.ROWS_DOUBLE * 9];
 		PartyChestMenu menu = new PartyChestMenu(id, inv, slot -> {
-			if (statusOnly) return;
+			if (statusOnly && slot != NAV_BACK) return;
 			if (slot >= 0 && slot < clicks.length && clicks[slot] != null) {
 				clicks[slot].run();
 			}
@@ -96,6 +107,7 @@ public final class SetupMenuHost {
 			}
 		};
 		fill.fill(page);
+		SpawnSetupController.stampNav(player, page, statusOnly);
 		SpawnSetupController.rememberReopen(player.getUUID(), () -> open(player, title, fill, statusOnly));
 		return menu;
 	}
